@@ -414,6 +414,12 @@ const pkcs7Padding = (data) => {
   const paddingBuff = Buffer.alloc(paddingSize, paddingSize)
   return Buffer.concat([data, paddingBuff], data.length + paddingSize)
 }
+// 零填充 https://en.wikipedia.org/wiki/Padding_(cryptography)#Zero_padding
+const zeroPadding = (data) => {
+  const paddingSize = BLOCK_SIZE - (data.length % BLOCK_SIZE)
+  const paddingBuff = Buffer.alloc(paddingSize, 0)
+  return Buffer.concat([data, paddingBuff], data.length + paddingSize)
+}
 
 // Block Buffer => Int32 Array
 const toInt32Array = (block) => [
@@ -432,13 +438,29 @@ const toCipcherBlock = (array) => {
   return block
 }
 
-const _encrypt = (data, key, iv, outputEncoding) => {
+// 删除 buffer:Buffer 尾部的 0x00
+const bufferTrimeEnd = (buffer) => {
+  let pos = 0
+  for (let i = buffer.length - 1; i >= 0; i--) {
+    if (buffer[i] !== 0x00) {
+        pos = i
+        break
+    }
+  }
+  return buffer.slice(0, pos + 1)
+}
+
+const _encrypt = (data, key, iv, outputEncoding, padding) => {
   // 初始化向量转换
   iv && (iv = toInt32Array(iv))
   // 密钥转换
   key = toInt32Array(key)
   // 分组填充
-  data = pkcs7Padding(data)
+  if(padding === 'zero') {
+    data = zeroPadding(data)
+  } else {
+    data = pkcs7Padding(data)
+  }
 
   // 分组加密结果
   const blocks = []
@@ -474,7 +496,7 @@ const _encrypt = (data, key, iv, outputEncoding) => {
   return outputEncoding ? buff.toString(outputEncoding) : toArrayBuffer(buff)
 }
 
-const _decrypt = (data, key, iv, outputEncoding) => {
+const _decrypt = (data, key, iv, outputEncoding, padding) => {
   // 初始化向量转换
   iv && (iv = toInt32Array(iv))
   // 密钥转换
@@ -532,7 +554,10 @@ const _decrypt = (data, key, iv, outputEncoding) => {
   }
 
   // 移除分组填充
-  const buff = Buffer.concat(
+  const buff = padding === "zero" ? bufferTrimeEnd(Buffer.concat(
+    blocks,
+    data.length
+  )) : Buffer.concat(
     blocks,
     data.length - blocks[blocks.length - 1][BLOCK_SIZE - 1]
   )
@@ -540,7 +565,7 @@ const _decrypt = (data, key, iv, outputEncoding) => {
 }
 
 export const encrypt = (data, key, options) => {
-  let { mode, iv, inputEncoding, outputEncoding } = options || {}
+  let { mode, iv, inputEncoding, outputEncoding, padding } = options || {}
 
   // 输入参数校验 `string` | `ArrayBuffer` | `Buffer`
   if (typeof data === 'string') {
@@ -568,11 +593,11 @@ export const encrypt = (data, key, options) => {
   }
   iv = mode === CBC ? Buffer.from(iv, 'hex') : null
 
-  return _encrypt(data, key, iv, outputEncoding)
+  return _encrypt(data, key, iv, outputEncoding, padding)
 }
 
 export const decrypt = (data, key, options) => {
-  let { mode, iv, inputEncoding, outputEncoding } = options || {}
+  let { mode, iv, inputEncoding, outputEncoding, padding } = options || {}
 
   // 输入参数校验 `string` | `ArrayBuffer` | `Buffer`
   if (typeof data === 'string') {
@@ -600,5 +625,5 @@ export const decrypt = (data, key, options) => {
   }
   iv = mode === CBC ? Buffer.from(iv, 'hex') : null
 
-  return _decrypt(data, key, iv, outputEncoding)
+  return _decrypt(data, key, iv, outputEncoding, padding)
 }
